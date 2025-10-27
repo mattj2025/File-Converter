@@ -48,6 +48,5 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="fileConverter.py" />
-    <None Include="test.py" />
   </ItemGroup>
 </Project>

@@ -1,5 +1,9 @@
-// FileConverter.cpp : Defines the entry point for the application.
-//
+/**
+* File Converter Win32 Program
+* 
+* https://github.com/mattj2025/File-Converter
+* 
+*/
 
 #include "framework.h"
 #include "FileConverter.h"
@@ -14,16 +18,35 @@
 #include <locale>
 #include <codecvt>
 #include <Urlmon.h>
+#include <commctrl.h> 
 
 #define MAX_LOADSTRING 100
 #define CONVERT_BUTTON 1223
 #define FILE_BUTTON 4407
+#define FILE_INPUT 2016
+#define TYPE_INPUT 80085
 
 HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 HWND hWnd;                                      // the main window
 std::vector<std::wstring> path;                 // the file path
+std::string outputFileExtension = "Other";      // the file type for output
+HWND fileLocation;                              // file location input obj
+HWND hEdit;                                     // type export input obj
+
+const LPCWSTR LfileExtensions[13] = {
+    TEXT("JPG"), TEXT("PDF"), TEXT("MP3"), TEXT("HEIC"),
+    TEXT("Webp"), TEXT("WORD"), TEXT("MP4"), TEXT("HTML"),
+    TEXT("GIF"), TEXT("JPEG"), TEXT("DOCX"), TEXT("PNG"),
+    TEXT("Other")
+};
+const std::string SfileExtensions[13] = {
+     "JPG",  "PDF",  "MP3",  "HEIC",
+     "Webp",  "WORD",  "MP4",  "HTML",
+     "GIF",  "JPEG",  "DOCX",  "PNG",
+     "Other"
+};
     
 ATOM                MyRegisterClass(HINSTANCE hInstance);
 BOOL                InitInstance(HINSTANCE, int);
@@ -64,6 +87,33 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     return (int) msg.wParam;
 }
 
+std::wstring StringToWString(const std::string& s) {
+    int len;
+    int slength = (int)s.length() + 1;
+    len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), slength, 0, 0);
+    std::wstring ws(len, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), slength, &ws[0], len);
+    // Remove the trailing null character
+    if (!ws.empty() && ws.back() == L'\0') ws.pop_back();
+    return ws;
+}
+
+char* wstringVectorToChar(const std::vector<std::wstring>& wvec) {
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+    std::ostringstream oss;
+
+    for (const auto& wstr : wvec) {
+        oss << converter.to_bytes(wstr);
+    }
+
+    std::string combined = oss.str();
+    char* result = new char[combined.size() + 1];
+    std::copy(combined.begin(), combined.end(), result);
+    result[combined.size()] = '\0';
+
+    return result;
+}
+
 
 /**
  * @brief Open a dialog to select item(s) or folder(s).
@@ -76,7 +126,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
  */
 bool OpenFileDialog(std::vector<std::wstring>& paths, bool selectFolder, bool multiSelect)
 {
-    HRESULT hrInit = CoInitialize(NULL); // Initialize COM
+    HRESULT hrInit = CoInitialize(NULL);
     IFileOpenDialog* p_file_open = nullptr;
     bool are_all_operation_success = false;
     while (!are_all_operation_success)
@@ -115,7 +165,7 @@ bool OpenFileDialog(std::vector<std::wstring>& paths, bool selectFolder, bool mu
 
         IShellItemArray* p_items;
         hr = p_file_open->GetResults(&p_items);
-        if (FAILED(hr))
+        if (FAILED(hr))         
             break;
         DWORD total_items = 0;
         hr = p_items->GetCount(&total_items);
@@ -143,39 +193,12 @@ bool OpenFileDialog(std::vector<std::wstring>& paths, bool selectFolder, bool mu
         are_all_operation_success = true;
     }
 
+    SetWindowText(fileLocation, StringToWString(wstringVectorToChar(path)).c_str());
+
     if (p_file_open)
         p_file_open->Release();
     if (SUCCEEDED(hrInit)) CoUninitialize(); // Uninitialize COM
     return are_all_operation_success;
-}
-
-
-std::wstring StringToWString(const std::string& s) {
-    int len;
-    int slength = (int)s.length() + 1;
-    len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), slength, 0, 0);
-    std::wstring ws(len, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), slength, &ws[0], len);
-    // Remove the trailing null character
-    if (!ws.empty() && ws.back() == L'\0') ws.pop_back();
-    return ws;
-}
-
-char* wstringVectorToChar(const std::vector<std::wstring>& wvec) {
-    // Convert each wstring to UTF-8 string
-    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
-    std::ostringstream oss;
-
-    for (const auto& wstr : wvec) {
-        oss << converter.to_bytes(wstr);
-    }
-
-    std::string combined = oss.str();
-    char* result = new char[combined.size() + 1];
-    std::copy(combined.begin(), combined.end(), result);
-    result[combined.size()] = '\0'; 
-
-    return result;
 }
 
 
@@ -201,6 +224,7 @@ bool SaveFileDialog(std::wstring& path, std::wstring defaultFileName = L"", std:
 
         if (!pFilterInfo)
         {
+            // TODO: Change save_filter
             COMDLG_FILTERSPEC save_filter[1];
             save_filter[0].pszName = L"All files";
             save_filter[0].pszSpec = L"*.*";
@@ -258,6 +282,20 @@ bool SaveFileDialog(std::wstring& path, std::wstring defaultFileName = L"", std:
     return are_all_operation_success;
 }
 
+wchar_t* stringToWchar_t(const std::string& s) {
+    // Determine the required buffer size
+    size_t requiredSize;
+    mbstowcs_s(&requiredSize, nullptr, 0, s.c_str(), _TRUNCATE);
+
+    // Allocate memory for the wide character string
+    // Add 1 for the null terminator
+    wchar_t* wcString = new wchar_t[requiredSize];
+
+    // Perform the conversion
+    mbstowcs_s(nullptr, wcString, requiredSize, s.c_str(), _TRUNCATE);
+
+    return wcString;
+}
 
 //
 //  FUNCTION: WndProc(HWND, UINT, WPARAM, LPARAM)
@@ -277,12 +315,61 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         if (LOWORD(wParam) == CONVERT_BUTTON && HIWORD(wParam) == BN_CLICKED) {
 
-            MessageBox(hWnd, L"Convert", L"Hello", NULL);
+            // TODO: update outputFileExtension
 
-            std::string cmd = "python fileConverter.py ";
-            char* pathStr = wstringVectorToChar(path);
-            cmd += pathStr;
+            std::string cmd = "python fileConverter.py \"";
+ 
+            int len = GetWindowTextLength(fileLocation);
+            wchar_t* pathStr = new wchar_t[len + 1];
+
+            GetWindowText(fileLocation, pathStr, len + 1);
+
+            char narrow_buffer[256]; 
+            size_t converted_chars = 0; 
+
+            size_t required_size;
+            wcstombs_s(&required_size, NULL, 0, pathStr, _TRUNCATE);
+
+            errno_t err = wcstombs_s(
+                &converted_chars,     
+                narrow_buffer,        
+                sizeof(narrow_buffer), 
+                pathStr,              
+                _TRUNCATE             
+            );
+
+            cmd += narrow_buffer;
+            cmd += "\" ";
+
+            if (outputFileExtension != "Other") {
+                cmd += outputFileExtension;
+            }
+            else {
+                int len = GetWindowTextLength(hEdit);
+                wchar_t* type = new wchar_t[len + 1];
+                GetWindowText(hEdit, type, len);
+
+                char narrow_buffer[256];
+                size_t converted_chars = 0;
+
+                size_t required_size;
+                wcstombs_s(&required_size, NULL, 0, pathStr, _TRUNCATE);
+
+                errno_t err = wcstombs_s(
+                    &converted_chars,
+                    narrow_buffer,
+                    sizeof(narrow_buffer),
+                    pathStr,
+                    _TRUNCATE
+                );
+
+                cmd += narrow_buffer;
+            }
             delete[] pathStr;
+               
+            std::wstring myWString(cmd.begin(), cmd.end());
+            LPCWSTR lpcwstr = myWString.c_str();
+            MessageBox(hWnd, lpcwstr, NULL, NULL);
 
             FILE* pipe = _popen(cmd.c_str(), "r");
             if (!pipe) return 1;
@@ -295,22 +382,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             _pclose(pipe);
 
 
-
-            // After reading the result from the Python script
-            result.erase(0, result.find_first_not_of(" \n\r\t")); // Trim leading whitespace
-            result.erase(result.find_last_not_of(" \n\r\t") + 1); // Trim trailing whitespace
+            // trim whitespace
+            result.erase(0, result.find_first_not_of(" \n\r\t")); 
+            result.erase(result.find_last_not_of(" \n\r\t") + 1);
 
             if (result.rfind("http://", 0) == 0 || result.rfind("https://", 0) == 0) {
-                // Valid URL, proceed with download
+
                 std::wstring wurl = StringToWString(result);
                 LPCWSTR url = wurl.c_str();
                 std::wstring savePath;
                 SaveFileDialog(savePath, L"convertedfile");
                 HRESULT hr = URLDownloadToFile(NULL, url, savePath.c_str(), 0, NULL);
-                // Handle hr as needed
+
             }
             else {
-                MessageBox(hWnd, L"Python did not return a valid URL.", L"Error", MB_ICONERROR);
+                MessageBox(hWnd, stringToWchar_t(result), L"Python did not return a valid URL", MB_ICONERROR);
             }
 
 
@@ -324,60 +410,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
             if (SUCCEEDED(hr)) {
                 MessageBox(hWnd, L"File downloaded successfully.", L"Success", NULL);
-
-                //std::cout << "File downloaded successfully." << std::endl;
             }
             else {
                 MessageBox(hWnd, L"Error downloading file", L"ERROR", NULL);
-               // std::cerr << "Error downloading file. HRESULT: " << hr << std::endl;
             }
-
-            /*  Test code for saving
-            FILE* pipe = _popen("python test.py ", "r");
-            if (!pipe) return 1;
-
-            char buffer[128];
-            std::string result;
-            while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-                result += buffer;
-            }
-            _pclose(pipe);
-
-            std::cout << "Python returned: " << result << std::endl;
-
-            HRESULT hr;
-            std::wstring wurl = StringToWString(result);
-            LPCWSTR url = wurl.c_str();
-            // LPCWSTR localPath = L"converted-file";
-            std::wstring savePath;
-            SaveFileDialog(savePath, L"convertedfile");
-
-            hr = URLDownloadToFile(NULL, url, savePath.c_str(), 0, NULL);
-
-            if (SUCCEEDED(hr)) {
-                std::cout << "File downloaded successfully." << std::endl;
-            }
-            else {
-                std::cerr << "Error downloading file. HRESULT: " << hr << std::endl;
-              }
-              */
-
-            /*
-            // old version
-            cmd += pathStr;
-            system(cmd.c_str());
-            std::string echo = "echo ";
-            echo += pathStr;
-            echo += "\npause";
-            system(echo.c_str());
-            delete[] pathStr;
-            */
 
 
         }
 
+        if (HIWORD(wParam) == CBN_SELCHANGE) {
+            int ItemIndex = SendMessage((HWND)lParam, (UINT)CB_GETCURSEL, (WPARAM)0, (LPARAM)0);
+            outputFileExtension = SfileExtensions[ItemIndex];
+        }
+
+
         if (LOWORD(wParam) == FILE_BUTTON && HIWORD(wParam) == BN_CLICKED) {
-            MessageBox(hWnd, L"Open", L"Hello", NULL);
 
             OpenFileDialog(path, false, false);
 
@@ -403,7 +450,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hWnd, &ps);
-        // TODO: Add any drawing code that uses hdc here...
+        // No custom drawing needed for "Output Type:" label here.
         EndPaint(hWnd, &ps);
     }
     break;
@@ -414,6 +461,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         return DefWindowProc(hWnd, message, wParam, lParam);
     }
     return 0;
+}
+
+// Set Segoe UI font for the main window and all child controls
+void SetModernFont(HWND hwnd) {
+    HFONT hFont = CreateFontW(
+        18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI"
+    );
+    SendMessage(hwnd, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+    // Enumerate all child windows and set their font
+    HWND child = GetWindow(hwnd, GW_CHILD);
+    while (child) {
+        SendMessage(child, WM_SETFONT, (WPARAM)hFont, TRUE);
+        child = GetWindow(child, GW_HWNDNEXT);
+    }
 }
 
 //
@@ -455,50 +519,132 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
 //
 BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
-   hInst = hInstance; // Store instance handle in our global variable
+    hInst = hInstance; // Store instance handle in our global variable
 
-   hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+    int winWidth = 480;
+    int winHeight = 260;
 
+    hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, 0, winWidth, winHeight, nullptr, nullptr, hInstance, nullptr);
 
-   HWND convertButton = CreateWindow(
-       L"BUTTON",       // Predefined class; Unicode assumed 
-       L"CONVERT",      // Button text 
-       WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,  // Styles 
-       120,         // x position 
-       10,          // y position 
-       100,         // Button width
-       100,         // Button height
-       hWnd,        // Parent window
-       (HMENU) CONVERT_BUTTON,  // No menu.
-       (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE),
-       NULL         // Pointer not needed.
-   );
+    int padding = 20;
+    int controlHeight = 32;
+    int labelHeight = 22;
+    int buttonHeight = 38;
+    int buttonWidth = 140;
+    int inputWidth = 260;
+    int comboWidth = 160;
 
-   HWND chooseButton = CreateWindow(
-       L"BUTTON",       // Predefined class; Unicode assumed 
-       L"CHOOSE FILE",      // Button text 
-       WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,  // Styles 
-       10,         // x position 
-       10,          // y position 
-       100,         // Button width
-       100,         // Button height
-       hWnd,        // Parent window
-       (HMENU)FILE_BUTTON,  // No menu.
-       (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE),
-       NULL         // Pointer not needed.
-   );
+    // File Location 
+    fileLocation = CreateWindowEx(
+        WS_EX_CLIENTEDGE,
+        TEXT("EDIT"),
+        TEXT("File Location"),
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+        padding, padding + labelHeight,     // x, y
+        inputWidth, controlHeight,          // width, height
+        hWnd,
+        (HMENU)FILE_INPUT,
+        GetModuleHandle(NULL),
+        NULL
+    );
 
+    // CHOOSE FILE button (left side, below file location)
+    HWND chooseButton = CreateWindowEx(
+        0,
+        L"BUTTON",
+        L"Browse...",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+        padding, padding + labelHeight + controlHeight, // x, y
+        buttonWidth, buttonHeight,     // width, height
+        hWnd,
+        (HMENU)FILE_BUTTON,
+        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE),
+        NULL
+    );
 
-   if (!hWnd)
-   {
-      return FALSE;
-   }
+    // Output Type label (above ComboBox)
+    HWND typeLabel = CreateWindowEx(
+        0,
+        L"STATIC",
+        L"Output Type:",
+        WS_CHILD | WS_VISIBLE,
+        padding + inputWidth + 10, padding,     // x, y
+        comboWidth, labelHeight,     // width, height
+        hWnd,
+        NULL,
+        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE),
+        NULL
+    );
 
-   ShowWindow(hWnd, nCmdShow);
-   UpdateWindow(hWnd);
+    // ComboBox (right side, below label)
+    HWND typeSelector = CreateWindowEx(
+        0,
+        WC_COMBOBOX,
+        L"",
+        CBS_DROPDOWN | CBS_HASSTRINGS | WS_CHILD | WS_OVERLAPPED | WS_VISIBLE,
+        padding + inputWidth + 10, padding + labelHeight,     // x, y
+        comboWidth, 180,    // width, height (height includes dropdown)
+        hWnd,
+        NULL,
+        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE),
+        NULL
+    );
 
-   return TRUE;
+    // Edit box (below ComboBox)
+    hEdit = CreateWindowEx(
+        WS_EX_CLIENTEDGE,
+        TEXT("EDIT"),
+        TEXT("If other..."),
+        WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+        padding + inputWidth + 10, padding + labelHeight + controlHeight + 12,     // x, y
+        comboWidth, controlHeight,     // width, height
+        hWnd,
+        (HMENU)TYPE_INPUT,
+        GetModuleHandle(NULL),
+        NULL
+    );
+
+    // CONVERT button (centered, below all controls)
+    int convertBtnX = (winWidth - buttonWidth) / 2;
+    int convertBtnY = 150; //winHeight - buttonHeight - padding;
+
+    HWND convertButton = CreateWindowEx(
+        0,
+        L"BUTTON",
+        L"Convert",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+        convertBtnX, convertBtnY, // x, y (centered horizontally)
+        buttonWidth, buttonHeight,
+        hWnd,
+        (HMENU)CONVERT_BUTTON,
+        (HINSTANCE)GetWindowLongPtr(hWnd, GWLP_HINSTANCE),
+        NULL
+    );
+
+    // Fill ComboBox
+    for (int i = 0; i < ARRAYSIZE(LfileExtensions); i++) {
+        SendMessage(typeSelector, CB_ADDSTRING, (WPARAM)0, (LPARAM) LfileExtensions[i]);
+    }
+    SendMessage(typeSelector, CB_SETCURSEL, (WPARAM)2, (LPARAM)0);
+
+    // Set font and modern visuals for all controls and main window
+    SetModernFont(hWnd);
+
+    SendMessage(fileLocation, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+    SendMessage(typeLabel, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+    SendMessage(typeSelector, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+    SendMessage(hEdit, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
+
+    if (!hWnd)
+    {
+        return FALSE;
+    }
+
+    ShowWindow(hWnd, nCmdShow);
+    UpdateWindow(hWnd);
+
+    return TRUE;
 }
 
 // Message handler for about box.

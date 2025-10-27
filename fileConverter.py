@@ -2,6 +2,7 @@ import requests
 import json
 import sys
 import os
+import time
 
 api_key = os.getenv('FILE_CONVERTER_API')
 base_url = "https://api.freeconvert.com/v1"
@@ -30,10 +31,14 @@ def wait_for_job_by_polling(job_id):
 if api_key == None:
     sys.exit("api key not found")
 
-if len(sys.argv) != 1:
+if len(sys.argv) != 2:
     upload_file_path = sys.argv[1]
+    export_file_type = sys.argv[2]
 else:
     sys.exit("Invalid number of arguments")
+
+file_extension = os.path.splitext(upload_file_path)
+
 
 freeconvert = requests.Session()
 freeconvert.headers.update({
@@ -72,12 +77,12 @@ job_response = freeconvert.post(f"{base_url}/process/jobs", json={
         "myConvert1": {
             "operation": "convert",
             "input": upload_task_id,
-            "output_format": "png",
+            "output_format": export_file_type,
         },
         "myExport1": {
             "operation": "export/url",
             "input": "myConvert1",
-            "filename": "converted-file.png",
+            "filename": "converted-file",
         },
     },
 })
